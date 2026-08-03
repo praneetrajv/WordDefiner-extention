@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup-header">
+    <h1>Word Definer</h1>
+    <button id="toggle-btn" class="toggle-off" title="Toggle double-click lookup on/off">OFF</button>
+  </div>
+
+  <div class="lookup-section">
+    <label for="word-input">Look up a word:</label>
+    <div class="input-row">
+      <input type="text" id="word-input" placeholder="Type a word\u2026" autocomplete="off" spellcheck="false">
+      <button id="lookup-btn">Define</button>
+    </div>
+    <p class="hint">Useful for PDFs and pages where double-click lookup is unavailable.</p>
+  </div>
+
+  <div id="result" class="result hidden"></div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

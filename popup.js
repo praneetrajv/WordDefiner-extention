@@ -6,8 +6,6 @@
   const lookupBtn = document.getElementById('lookup-btn');
   const resultDiv = document.getElementById('result');
 
-  // --- Toggle state ---
-
   function updateToggleUI(isActive) {
     toggleBtn.textContent = isActive ? 'ON' : 'OFF';
     toggleBtn.className = isActive ? 'toggle-on' : 'toggle-off';
@@ -28,8 +26,6 @@
     const isActive = !res.isActive;
     await browser.storage.local.set({ isActive });
   });
-
-  // --- Word lookup (via background script to avoid CORS) ---
 
   function escapeHTML(str) {
     const div = document.createElement('div');
@@ -67,38 +63,23 @@
   function renderResult(data) {
     let html = '';
 
-    for (const meaning of data) {
-      const phonetic = (meaning.phonetics || []).find((p) => p.text);
-      const audio = (meaning.phonetics || []).find((p) => p.audio);
+    for (const item of data) {
+      const defs = (item.defs || []).slice(0, 4);
 
       html += `<div class="result-block">`;
-      html += `<div class="result-word">${escapeHTML(meaning.word)}</div>`;
-      if (phonetic) {
-        html += `<span class="result-phonetic">${escapeHTML(phonetic.text)}</span>`;
+      html += `<div class="result-word">${escapeHTML(item.word)}</div>`;
+      html += '<ol class="result-defs">';
+      for (const d of defs) {
+        const parts = d.split('\t');
+        const textDef = parts[parts.length - 1];
+        html += `<li>${escapeHTML(textDef)}</li>`;
       }
-      if (audio) {
-        html += `<button class="result-audio" data-url="${escapeHTML(audio.audio)}" title="Play pronunciation">&#127908;</button>`;
-      }
-
-      for (const m of meaning.meanings) {
-        html += `<div class="result-pos">${escapeHTML(m.partOfSpeech)}</div>`;
-        html += '<ol class="result-defs">';
-        for (const d of m.definitions.slice(0, 3)) {
-          html += `<li>${escapeHTML(d.definition)}</li>`;
-        }
-        html += '</ol>';
-      }
+      html += '</ol>';
       html += `</div>`;
     }
 
     resultDiv.innerHTML = html;
-
-    resultDiv.querySelectorAll('.result-audio').forEach((btn) => {
-      btn.addEventListener('click', () => new Audio(btn.dataset.url).play());
-    });
   }
-
-  // --- Events ---
 
   lookupBtn.addEventListener('click', () => lookup(wordInput.value));
 
@@ -106,7 +87,6 @@
     if (e.key === 'Enter') lookup(wordInput.value);
   });
 
-  // Pre-fill from current selection
   browser.tabs.query({ active: true, currentWindow: true }).then(async (tabs) => {
     try {
       const response = await browser.tabs.sendMessage(tabs[0].id, { type: 'GET_SELECTION' });

@@ -18,9 +18,9 @@ function updateBadge(isActive) {
   browser.action.setBadgeBackgroundColor({ color: isActive ? '#22c55e' : '#ef4444' });
 }
 
-// --- Centralized dictionary API lookup ---
+// --- Datamuse API lookup with Fallback ---
 
-const API_BASE = 'https://api.dictionaryapi.dev/api/v2/entries/en';
+const API_BASE = 'https://api.datamuse.com/words';
 
 async function lookupWord(word) {
   const cleaned = word.replace(/^[^\w]+|[^\w]+$/g, '').trim();
@@ -28,59 +28,63 @@ async function lookupWord(word) {
     return { error: 'invalid', message: 'Please enter a valid word (2+ letters).' };
   }
 
-  let response = await fetch(`${API_BASE}/${encodeURIComponent(cleaned)}`);
-
-  // Smart Fallback: Attempt multiple root variations if the exact word fails
-  if (!response.ok) {
-    let variations = [];
-    const lowerCleaned = cleaned.toLowerCase();
-
-    if (lowerCleaned.endsWith('ies')) {
-      variations.push(lowerCleaned.slice(0, -3) + 'y'); // flies -> fly
-    } else if (lowerCleaned.endsWith('ied')) {
-      variations.push(lowerCleaned.slice(0, -3) + 'y'); // spied -> spy
-    } else if (lowerCleaned.endsWith('ed')) {
-      variations.push(lowerCleaned.slice(0, -1)); // doted -> dote
-      variations.push(lowerCleaned.slice(0, -2)); // angered -> anger
-      
-      // Handle double consonants: mapped -> map
-      if (lowerCleaned.length > 3 && lowerCleaned[lowerCleaned.length-3] === lowerCleaned[lowerCleaned.length-4]) {
-         variations.push(lowerCleaned.slice(0, -3)); 
-      }
-    } else if (lowerCleaned.endsWith('ing')) {
-      variations.push(lowerCleaned.slice(0, -3)); // angering -> anger
-      variations.push(lowerCleaned.slice(0, -3) + 'e'); // doting -> dote
-      
-      // Handle double consonants: running -> run
-      if (lowerCleaned.length > 4 && lowerCleaned[lowerCleaned.length-4] === lowerCleaned[lowerCleaned.length-5]) {
-         variations.push(lowerCleaned.slice(0, -4)); 
-      }
-    } else if (lowerCleaned.endsWith('s') && !lowerCleaned.endsWith('ss')) {
-      variations.push(lowerCleaned.slice(0, -1)); // cats -> cat
-      if (lowerCleaned.endsWith('es')) {
-        variations.push(lowerCleaned.slice(0, -2)); // catches -> catch
-      }
+  // Helper function to call Datamuse
+  const fetchDatamuse = async (queryStr) => {
+    const response = await fetch(`${API_BASE}?sp=${encodeURIComponent(queryStr)}&md=d&max=1`);
+    if (response.ok) {
+        const data = await response.json();
+        if (data && data.length > 0 && data[0].defs) {
+            return { error: null, data };
+        }
     }
+    return null;
+  };
 
-    // Try fetching the variations one by one until a match is found
-    for (const variant of variations) {
-      response = await fetch(`${API_BASE}/${encodeURIComponent(variant)}`);
-      if (response.ok) break; 
+  // 1. Initial Attempt
+  let result = await fetchDatamuse(cleaned);
+  if (result) return result;
+
+  // 2. Smart Fallback: Attempt root variations
+  let variations = [];
+  const lowerCleaned = cleaned.toLowerCase();
+
+  if (lowerCleaned.endsWith('ies')) {
+    variations.push(lowerCleaned.slice(0, -3) + 'y');
+  } else if (lowerCleaned.endsWith('ied')) {
+    variations.push(lowerCleaned.slice(0, -3) + 'y');
+  } else if (lowerCleaned.endsWith('ed')) {
+    variations.push(lowerCleaned.slice(0, -1));
+    variations.push(lowerCleaned.slice(0, -2));
+    if (lowerCleaned.length > 3 && lowerCleaned[lowerCleaned.length-3] === lowerCleaned[lowerCleaned.length-4]) {
+       variations.push(lowerCleaned.slice(0, -3)); 
+    }
+  } else if (lowerCleaned.endsWith('ing')) {
+    variations.push(lowerCleaned.slice(0, -3));
+    variations.push(lowerCleaned.slice(0, -3) + 'e');
+    if (lowerCleaned.length > 4 && lowerCleaned[lowerCleaned.length-4] === lowerCleaned[lowerCleaned.length-5]) {
+       variations.push(lowerCleaned.slice(0, -4)); 
+    }
+  } else if (lowerCleaned.endsWith('s') && !lowerCleaned.endsWith('ss')) {
+    variations.push(lowerCleaned.slice(0, -1));
+    if (lowerCleaned.endsWith('es')) {
+      variations.push(lowerCleaned.slice(0, -2));
     }
   }
 
-  if (!response.ok) {
-    return { error: 'not_found', message: `No definition found for "${cleaned}".` };
+  // Try fetching variations one by one
+  for (const variant of variations) {
+    result = await fetchDatamuse(variant);
+    if (result) return result; 
   }
 
-  const data = await response.json();
-  return { error: null, data };
+  // 3. Final failure if no variations matched
+  return { error: 'not_found', message: `No definition found for "${cleaned}".` };
 }
 
-// Listen for lookup requests from content scripts, popup, etc.
+// Listen for lookup requests from content scripts, sidebar/popup
 browser.runtime.onMessage.addListener((msg) => {
   if (msg.type === 'LOOKUP' && msg.word) {
-    return lookupWord(msg.word); // Return Promise directly (Firefox pattern)
+    return lookupWord(msg.word);
   }
 });
 
@@ -99,10 +103,8 @@ browser.contextMenus.onClicked.addListener(async (info, tab) => {
   const word = info.selectionText.trim();
   if (!word) return;
 
-  // Send to content script to show tooltip
   try {
-    const res = await browser.tabs.sendMessage(tab.id, { type: 'LOOKUP_WORD', word });
-    if (res && res.success) return;
+    await browser.tabs.sendMessage(tab.id, { type: 'LOOKUP_WORD', word });
   } catch {
     // Content script not available
   }

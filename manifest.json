@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Word Definer",
-  "version": "1.4",
+  "version": "1.3",
   "description": "Instant dictionary: double-click any word on web pages to see its definition. Persistent sidebar for local files and PDFs.",
   "permissions": [
     "storage",

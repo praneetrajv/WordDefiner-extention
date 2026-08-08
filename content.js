@@ -5,8 +5,6 @@
   let pendingTooltip = null;
   let currentTooltip = null;
 
-  // --- State management ---
-
   browser.storage.local.get('isActive').then((res) => {
     isActive = res.isActive || false;
   });
@@ -18,7 +16,7 @@
     }
   });
 
-  // --- Messages from background / popup / sidebar ---
+  // --- Message Listener ---
 
   browser.runtime.onMessage.addListener((msg) => {
     if (msg.type === 'TOGGLE') {
@@ -27,56 +25,87 @@
       return Promise.resolve({ success: true });
     }
     if (msg.type === 'LOOKUP_WORD' && msg.word) {
-      tooltipLookup(msg.word);
+      const context = getSelectedContext();
+      tooltipLookup(msg.word, context);
       return Promise.resolve({ success: true });
     }
     if (msg.type === 'GET_SELECTION') {
       const sel = window.getSelection();
       const text = sel ? sel.toString().trim() : '';
-      return Promise.resolve({ text });
+      const context = getSelectedContext();
+      return Promise.resolve({ text, context });
     }
     return undefined;
   });
+
+  function getSelectedContext() {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return '';
+    const anchor = sel.anchorNode;
+    if (!anchor) return '';
+
+    let element = anchor.parentElement;
+    
+    // List of inline HTML tags that don't contain full paragraph context
+    const inlineTags = new Set([
+      'B', 'I', 'STRONG', 'EM', 'SPAN', 'CODE', 'A', 'MARK', 
+      'SMALL', 'SUB', 'SUP', 'U', 'VAR', 'LABEL', 'CITE'
+    ]);
+
+    // Traverse up the DOM tree until we reach a block element (like <p>, <div>, <li>)
+    while (
+      element && 
+      inlineTags.has(element.tagName) && 
+      element.parentElement && 
+      element.parentElement.tagName !== 'BODY'
+    ) {
+      element = element.parentElement;
+    }
+
+    // Fallback: If text is too short (< 20 chars), take the parent element's parent text
+    if (element && element.innerText.trim().length < 20 && element.parentElement) {
+      element = element.parentElement;
+    }
+
+    return element ? element.innerText.trim() : sel.toString().trim();
+  }
 
   function cleanWord(raw) {
     return raw.replace(/^[^\w]+|[^\w]+$/g, '').trim();
   }
 
-  async function apiLookup(word) {
-    const cleaned = cleanWord(word);
-    if (!cleaned || cleaned.length < 2) return null;
+  // --- Tooltip Rendering ---
 
-    try {
-      return await browser.runtime.sendMessage({ type: 'LOOKUP', word: cleaned });
-    } catch (err) {
-      console.error('Word Definer: lookup failed', err);
-      return { error: 'network', message: 'Could not reach dictionary service.' };
-    }
+  function showTooltip(rect, html) {
+    removeTooltip();
+
+    const tooltip = document.createElement('div');
+    tooltip.id = 'word-definer-tooltip';
+    tooltip.innerHTML = html;
+
+    // Prevent mousedown inside tooltip from clearing text selection
+    tooltip.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+    });
+
+    currentTooltip = tooltip;
+    positionTooltip(tooltip, rect);
+
+    document.addEventListener('mousedown', handleOutsideClick, true);
   }
 
-  // --- Tooltip rendering ---
-
-  function buildTooltipHTML(word, data) {
-    const item = data[0];
-    const defs = (item.defs || []).slice(0, 3);
-
-    let html = '';
-    html += `<span class="wd-word">${escapeHTML(word)}</span>`;
-    html += '<ul class="wd-defs">';
-    for (const d of defs) {
-      const parts = d.split('\t');
-      const textDef = parts[parts.length - 1];
-      html += `<li>${escapeHTML(textDef)}</li>`;
+  function removeTooltip() {
+    if (currentTooltip) {
+      currentTooltip.remove();
+      currentTooltip = null;
     }
-    html += '</ul>';
-
-    return html;
+    document.removeEventListener('mousedown', handleOutsideClick, true);
   }
 
-  function escapeHTML(str) {
-    const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
+  function handleOutsideClick(e) {
+    if (currentTooltip && !currentTooltip.contains(e.target)) {
+      removeTooltip();
+    }
   }
 
   function positionTooltip(el, rect) {
@@ -102,67 +131,92 @@
     el.style.top = y + 'px';
   }
 
-  function showTooltip(rect, html, isLoading) {
-    removeTooltip();
-
-    const tooltip = document.createElement('div');
-    tooltip.id = 'word-definer-tooltip';
-    tooltip.innerHTML = html;
-    if (isLoading) tooltip.classList.add('wd-loading');
-
-    currentTooltip = tooltip;
-    positionTooltip(tooltip, rect);
-
-    document.addEventListener('mousedown', handleOutsideClick, true);
-  }
-
-  function removeTooltip() {
-    if (currentTooltip) {
-      currentTooltip.remove();
-      currentTooltip = null;
-    }
-    document.removeEventListener('mousedown', handleOutsideClick, true);
-  }
-
-  function handleOutsideClick(e) {
-    if (currentTooltip && !currentTooltip.contains(e.target)) {
-      removeTooltip();
-    }
-  }
-
-  async function tooltipLookup(word) {
+  async function tooltipLookup(word, context) {
     const cleaned = cleanWord(word);
     if (!cleaned || cleaned.length < 2) return;
 
     const sel = window.getSelection();
-    if (sel && sel.rangeCount > 0) {
-      const rect = sel.getRangeAt(0).getBoundingClientRect();
-      showTooltip(
-        rect,
-        `<span class="wd-word">${escapeHTML(cleaned)}</span><span class="wd-loading-text">Looking up\u2026</span>`,
-        true
-      );
-    }
-
-    const result = await apiLookup(cleaned);
-
-    if (!currentTooltip) return;
     if (!sel || sel.rangeCount === 0) return;
     const rect = sel.getRangeAt(0).getBoundingClientRect();
 
-    if (!result || result.error) {
-      const msg = result ? result.message : 'Lookup failed.';
-      showTooltip(rect, `<span class="wd-word">${escapeHTML(cleaned)}</span><span class="wd-error">${escapeHTML(msg)}</span>`, false);
-      return;
+    showTooltip(
+      rect,
+      `<span class="wd-word">${escapeHTML(cleaned)}</span>
+       <span class="wd-loading-text">Looking up…</span>`
+    );
+
+    const result = await browser.runtime.sendMessage({ type: 'LOOKUP', word: cleaned });
+
+    if (!currentTooltip) return;
+
+    let html = `<span class="wd-word">${escapeHTML(cleaned)}</span>`;
+
+    if (result && !result.error && result.data && result.data[0]?.defs) {
+      const defs = result.data[0].defs.slice(0, 2);
+      html += '<ul class="wd-defs">';
+      for (const d of defs) {
+        const textDef = d.split('\t').pop();
+        html += `<li>${escapeHTML(textDef)}</li>`;
+      }
+      html += '</ul>';
+    } else {
+      html += `<div class="wd-error">No dictionary definition found.</div>`;
     }
 
-    showTooltip(rect, buildTooltipHTML(cleaned, result.data), false);
+    html += `
+      <div class="wd-ai-container">
+        <button id="wd-ai-btn" class="wd-ai-btn">🤖 Explain in Context</button>
+        <div id="wd-ai-result" class="wd-ai-result hidden"></div>
+      </div>
+    `;
+
+    showTooltip(rect, html);
+
+    const aiBtn = currentTooltip.querySelector('#wd-ai-btn');
+    const aiResultDiv = currentTooltip.querySelector('#wd-ai-result');
+
+    if (aiBtn) {
+      aiBtn.addEventListener('click', async (e) => {
+        e.stopPropagation(); // Stop event propagation
+        aiBtn.disabled = true;
+        aiBtn.innerText = '🤖 Analyzing Context…';
+        aiResultDiv.classList.remove('hidden');
+        aiResultDiv.innerHTML = '<span class="wd-loading-text">Thinking…</span>';
+
+        const aiResponse = await browser.runtime.sendMessage({
+          type: 'AI_EXPLAIN',
+          targetText: cleaned,
+          surroundingContext: context,
+          mode: 'contextual_definition'
+        });
+
+        if (aiResponse && !aiResponse.error) {
+          aiResultDiv.innerHTML = `<div class="wd-ai-text">${escapeHTML(aiResponse.explanation)}</div>`;
+          aiBtn.innerText = '🤖 AI Context Explanation';
+        } else {
+          aiResultDiv.innerHTML = `<div class="wd-error">${escapeHTML(aiResponse.message)}</div>`;
+          aiBtn.disabled = false;
+          aiBtn.innerText = '🤖 Retry AI';
+        }
+      });
+    }
   }
 
-  // --- Selection listener ---
+  function escapeHTML(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
 
-  document.addEventListener('mouseup', () => {
+  // --- Mouse Selection Listener ---
+
+  document.addEventListener('mouseup', (e) => {
     if (!isActive) return;
+
+    // IGNORE mouseup if user clicked inside the active tooltip
+    if (currentTooltip && currentTooltip.contains(e.target)) {
+      return;
+    }
 
     if (pendingTooltip) {
       clearTimeout(pendingTooltip);
@@ -177,8 +231,8 @@
       const word = sel.toString().trim();
       if (!word || word.includes(' ') || word.length < 2) return;
 
-      tooltipLookup(word);
+      const context = getSelectedContext();
+      tooltipLookup(word, context);
     }, 150);
   });
-
 })();

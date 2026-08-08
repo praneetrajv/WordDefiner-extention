@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Word Definer",
-  "version": "1.3",
-  "description": "Instant dictionary: double-click any word on web pages to see its definition. Persistent sidebar for local files and PDFs.",
+  "name": "Word Definer AI",
+  "version": "2.0",
+  "description": "Instant dictionary with context-aware AI explanation powered by Gemini.",
   "permissions": [
     "storage",
     "activeTab",
@@ -10,15 +10,17 @@
     "contextMenus"
   ],
   "host_permissions": [
-    "https://api.datamuse.com/*",
-    "<all_urls>"
-  ],
+      "https://api.datamuse.com/*",
+      "https://generativelanguage.googleapis.com/*",
+      "http://localhost:8000/*",
+      "<all_urls>"
+    ],  
   "action": {
-    "default_title": "Word Definer",
+    "default_title": "Word Definer AI",
     "default_popup": "popup.html"
   },
   "sidebar_action": {
-    "default_title": "Word Definer",
+    "default_title": "Word Definer AI",
     "default_panel": "popup.html"
   },
   "background": {

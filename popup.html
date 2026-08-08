@@ -6,17 +6,27 @@
 </head>
 <body>
   <div class="popup-header">
-    <h1>Word Definer</h1>
+    <h1>Word Definer AI</h1>
     <button id="toggle-btn" class="toggle-off" title="Toggle double-click lookup on/off">OFF</button>
   </div>
 
   <div class="lookup-section">
     <label for="word-input">Look up a word:</label>
     <div class="input-row">
-      <input type="text" id="word-input" placeholder="Type a word\u2026" autocomplete="off" spellcheck="false">
+      <input type="text" id="word-input" placeholder="Type a word…" autocomplete="off" spellcheck="false">
       <button id="lookup-btn">Define</button>
     </div>
     <p class="hint">Useful for PDFs and pages where double-click lookup is unavailable.</p>
+  </div>
+
+  <!-- Settings Section for User's Gemini API Key -->
+  <div class="settings-section" style="margin-top: 12px; padding-top: 10px; border-top: 1px solid #45475a;">
+    <label for="api-key-input" style="font-size: 11px; color: #a6adc8; display: block; margin-bottom: 4px;">Gemini API Key (for AI Context):</label>
+    <div class="input-row">
+      <input type="password" id="api-key-input" placeholder="Paste AI Studio Key…" autocomplete="off">
+      <button id="save-key-btn" style="background: #a6e3a1; color: #11111b;">Save</button>
+    </div>
+    <p id="key-status" class="hint" style="color: #a6e3a1; margin-top: 4px; display: none;">Key saved locally!</p>
   </div>
 
   <div id="result" class="result hidden"></div>

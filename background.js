@@ -1,3 +1,13 @@
+const AI_CONFIG = {
+  SYSTEM_PROMPT: (targetText, surroundingContext) => 
+    `You are an expert reading assistant.
+Target Word/Phrase: "${targetText}"
+Provided Passage: "${surroundingContext}"
+
+If the 'Provided Passage' is exactly the same as the 'Target Word/Phrase' (manual word lookup), provide a concise dictionary definition and 2 example sentences.
+Otherwise, explain specifically how "${targetText}" is used in the provided passage and what it implies in this context. Keep it under 3 sentences.`
+};
+
 // --- Badge / toggle state ---
 
 browser.storage.local.get('isActive').then((res) => {
@@ -81,12 +91,7 @@ async function lookupWord(word) {
   return { error: 'not_found', message: `No definition found for "${cleaned}".` };
 }
 
-// Listen for lookup requests from content scripts, sidebar/popup
-browser.runtime.onMessage.addListener((msg) => {
-  if (msg.type === 'LOOKUP' && msg.word) {
-    return lookupWord(msg.word);
-  }
-});
+
 
 // --- Context menu: "Define Word" ---
 
@@ -109,3 +114,77 @@ browser.contextMenus.onClicked.addListener(async (info, tab) => {
     // Content script not available
   }
 });
+
+
+// --- Message Routing ---
+browser.runtime.onMessage.addListener((msg) => {
+  switch (msg.type) {
+    case 'LOOKUP':
+      if (msg.word) {
+        return lookupWord(msg.word);
+      }
+      break;
+
+    case 'AI_EXPLAIN':
+      return fetchAIExplanation(msg.targetText, msg.surroundingContext, msg.mode);
+
+    default:
+      console.warn('Unhandled message type:', msg.type);
+  }
+});
+// --- AI Handler (Direct Gemini API with FastAPI Fallback) ---
+
+async function fetchAIExplanation(targetText, surroundingContext, mode = 'contextual_definition') {
+  try {
+    const storageData = await browser.storage.local.get('geminiApiKey');
+    const userKey = storageData.geminiApiKey;
+
+    if (userKey) {
+     const prompt = AI_CONFIG.SYSTEM_PROMPT(targetText, surroundingContext);
+
+      // API key removed from URL query parameters
+      const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'x-goog-api-key': userKey // Sent securely via header
+        },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }]
+        })
+      });
+
+      if (!response.ok) {
+        const errData = await response.json();
+        return { error: 'api_error', message: errData.error?.message || 'Gemini API Request Failed' };
+      }
+
+      const data = await response.json();
+      const explanation = data.candidates?.[0]?.content?.parts?.[0]?.text || 'No explanation generated.';
+      return { error: null, explanation };
+
+    } else {
+      // 2. Fallback to Local FastAPI Backend if no key is saved
+      const response = await fetch('http://localhost:8000/explain', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          target_text: targetText,
+          surrounding_context: surroundingContext,
+          mode: mode
+        })
+      });
+
+      if (!response.ok) {
+        const errData = await response.json();
+        return { error: 'api_error', message: errData.detail || 'Backend error occurred.' };
+      }
+
+      const data = await response.json();
+      return { error: null, explanation: data.explanation };
+    }
+  } catch (err) {
+    console.error('Word Definer: AI Request failed', err);
+    return { error: 'network', message: 'Could not connect to Gemini API or local FastAPI backend.' };
+  }
+}
